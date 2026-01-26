@@ -263,10 +263,12 @@ class EICStorage(HiCacheStorage):
         self.trans_type = eic.TransportType(eic_trans_type)
         self.kv_cache_dtype = self.memory_pool_host.dtype
         self.is_mla_model = hicache_config.is_mla_model
-        self.rank = hicache_config.tp_rank
+        self.tp_rank = hicache_config.tp_rank
         self.world_size = hicache_config.tp_size
         self.page_size = self.memory_pool_host.page_size
         self.use_zero_copy = self.memory_pool_host.layout == "page_first"
+        self.pp_rank = hicache_config.pp_rank
+        self.pp_size = hicache_config.pp_size
         if not self.use_zero_copy:
             self.kv_cache_shape = self.memory_pool_host.get_data_page(
                 0, flat=True
@@ -313,11 +315,9 @@ class EICStorage(HiCacheStorage):
 
     def _init_eic_prefix(self):
         if self.is_mla_model:
-            self.eic_prefix = (
-                f"{self.model_name}_mla_att_{self.host_kvcache_layout}@sglang"
-            )
+            self.eic_prefix = f"{self.model_name}_mla_att_{self.host_kvcache_layout}_{self.pp_size}_{self.pp_rank}@sglang"
         else:
-            self.eic_prefix = f"{self.model_name}_mha_attn_{self.host_kvcache_layout}_{self.rank}_{self.world_size}_@sglang"
+            self.eic_prefix = f"{self.model_name}_mha_attn_{self.host_kvcache_layout}_{self.tp_rank}_{self.world_size}_{self.pp_size}_{self.pp_rank}@sglang"
 
     def _get_eic_key(self, keys: List[str]) -> str:
         return [f"{self.eic_prefix}_{key}" for key in keys]
@@ -438,8 +438,8 @@ class EICStorage(HiCacheStorage):
     def _filter_kv_cache(self, total_len) -> Tuple[int, int]:
         mean_len = total_len // self.world_size
         remainder = total_len % self.world_size
-        tp_keys_len = mean_len + (1 if self.rank < remainder else 0)
-        start = self.rank * mean_len + min(self.rank, remainder)
+        tp_keys_len = mean_len + (1 if self.tp_rank < remainder else 0)
+        start = self.tp_rank * mean_len + min(self.tp_rank, remainder)
         end = start + tp_keys_len
         logger.debug(f"start: {start}, end: {end}, tp_keys_len: {tp_keys_len}")
         return start, end
